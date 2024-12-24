@@ -33,6 +33,18 @@ def add_message():
         'class_name': class_name,
         'sentiment': sentiment
     })
+
+    # Return a success response
+    return jsonify({
+        'message': 'Message added successfully!',
+        'stored_data': {
+            'message': message,
+            'subject': subject,
+            'class_name': class_name,
+            'sentiment': sentiment
+        }
+    }), 200
+
 @app.route('/update_sentiment', methods=['GET'])
 def update_sentiment():
     # Retrieve all documents
@@ -68,30 +80,29 @@ def get_messages():
     
     return jsonify(messages)
 
-@app.route('/analyze')
+@app.route('/analyze', methods=['GET'])
 def analyze():
     group_by = request.args.get('group_by')
-    
-    # Fetch all messages
     messages = list(collection.find())
-    
-    # If no group_by is provided, compute the overall mode sentiment
-    if group_by is None:
-        sentiments = [message['sentiment'] for message in messages]
-        sentiment_counter = Counter(sentiments)
-        mode_sentiment, _ = sentiment_counter.most_common(1)[0]
-        return jsonify({'mode_sentiment': mode_sentiment})
 
-    # If group_by is provided, group sentiment analysis by the specified parameter (class_name or subject)
+    if not messages:
+        return jsonify({'error': 'No messages found in the database'}), 404
+
+    # Adjust to support 'class' as a valid group_by value
+    if group_by not in ['class_name', 'subject', 'class']:
+        return jsonify({'error': 'Invalid group_by parameter. Valid values are "class_name", "subject", or "class".'}), 400
+
+    if group_by == 'class':
+        group_by = 'class_name'  # treat 'class' as 'class_name'
+
     grouped_data = {}
     for message in messages:
         group_key = message.get(group_by)
         if group_key:
             if group_key not in grouped_data:
                 grouped_data[group_key] = []
-            grouped_data[group_key].append(message['sentiment'])
+            grouped_data[group_key].append(message.get('sentiment', 'neutral'))
 
-    # Calculate mode sentiment for each group
     result = {}
     for group_key, sentiments in grouped_data.items():
         sentiment_counter = Counter(sentiments)
@@ -99,24 +110,24 @@ def analyze():
         result[group_key] = mode_sentiment
 
     return jsonify(result)
+
 @app.route('/search', methods=['GET'])
 def get_messages_by_sentiment():
-    # Get the sentiment query parameter from the request
-    sentiment = request.args.get('query')
+    query = request.args.get('query')
 
-    # Check if sentiment is provided
-    if not sentiment:
-        return jsonify({'error': 'Sentiment query parameter is required'}), 400
+    # Check if query is provided
+    if not query:
+        return jsonify({'error': 'Query parameter is required'}), 400
 
-    # Retrieve messages that match the given sentiment
-    messages = list(collection.find({'sentiment': sentiment}))
+    # Retrieve messages that contain the query word (e.g., "good") in the message
+    messages = list(collection.find({'message': {'$regex': query, '$options': 'i'}}))
 
     # Convert _id to string for JSON serialization
     for message in messages:
         message['_id'] = str(message['_id'])
 
-    # Return the filtered messages as JSON
     return jsonify(messages)
+
 
 if __name__ == '__main__':
     app.run(debug=True)
